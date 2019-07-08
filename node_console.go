@@ -116,7 +116,7 @@ func (c *NodeConsole) processInput(ipt []string) int {
 func (c *NodeConsole) Run() int {
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go c.node.Run(&wg)
+	go c.node.Run()
 	wg.Add(1)
 	go c.processNodeInfo(&wg)
 	reader := bufio.NewReader(os.Stdin)

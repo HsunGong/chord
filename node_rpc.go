@@ -173,31 +173,30 @@ func (h *rpcServer) rpcDialWithNodeInfo(n *NodeInfo) *net.Conn {
 	return tconn
 }
 
-func (h *rpcServer) ping(g string, addr string) string {
+func (h *rpcServer) ping(g string, addr string) (bool, string) {
 	var relpy, arg Greet
 	arg.Name = g
 	arg.From = h.node.Info
 	tconn := h.rpcDial(addr)
 	if tconn == nil {
-		return ""
+		return false, "error dial"
 	}
+
 	cl := rpc.NewClient(*tconn)
-	err := cl.Call("RingRPC.Ping", &arg, &relpy)
-	if err != nil {
-		cl.Close()
-		if err != nil {
-			h.node.SendMessageOut("close error:" + err.Error())
-		}
-		h.node.SendMessageOut("Call Fail:" + err.Error())
-		return ""
-	} else {
-		cl.Close()
-		return relpy.From.GetAddrWithPort() + ":" + relpy.Name
+	if err := cl.Call("RingRPC.Ping", &arg, &relpy); err != nil {
+		return false, "Call Fail:" + err.Error()
 	}
+
+	if e := cl.Close(); e != nil {
+		return false, "close error:" + e.Error()
+	}
+
+	return true, fmt.Sprintf("At %s with %s\n", relpy.From.GetAddrWithPort(), relpy.Name)
 }
 
 func (h *rpcServer) pingWithNodeInfo(g string, nif *NodeInfo) string {
-	return h.ping(g, nif.IpAddress+":"+strconv.Itoa(int(nif.Port)))
+	_, s := h.ping(g, nif.IpAddress+":"+strconv.Itoa(int(nif.Port)))
+	return s
 }
 
 func (h *rpcServer) put(k string, v string) bool {
@@ -235,7 +234,7 @@ func (h *rpcServer) put(k string, v string) bool {
 
 }
 
-func (h *rpcServer) get(k string) (string, bool) {
+func (h *rpcServer) get(k string) (bool, string) {
 	var arg HashedValue
 	var arg1 NodeData
 	var ret NodeValue
@@ -247,25 +246,23 @@ func (h *rpcServer) get(k string) (string, bool) {
 	ferr := h.service.FindSuccessorInit(arg, &ret)
 	if ferr != nil {
 		h.node.SendMessageOut("Get fail when find succ: " + ferr.Error())
-		return "", false
+		return false, ""
 	}
 	arg1.From = h.node.Info
 	arg1.Key = k
 	tconn := h.rpcDialWithNodeInfo(&ret.V)
 	if tconn == nil {
-		h.node.SendMessageOut("Get fail when dial succ")
-		return "", false
+		return false, "Get fail when dial succ"
 	}
+
 	cl = rpc.NewClient(*tconn)
-	err := cl.Call("RingRPC.Get", &arg1, &ret1)
-	cl.Close()
-	if err != nil {
-		h.node.SendMessageOut("Get fail when Call" + err.Error())
-		return "", false
-	} else {
-		h.node.SendMessageOut("Get success")
-		return ret1.Value, true
+	if err := cl.Call("RingRPC.Get", &arg1, &ret1); err != nil {
+		return false, "Get fail when Call " + err.Error()
 	}
+	cl.Close()
+
+	h.node.SendMessageOut("Get success")
+	return true, ret1.Value
 }
 
 func (h *rpcServer) remove(k string) bool {
@@ -435,7 +432,7 @@ func (h *rpcServer) doCheckPredecessor() {
 		return
 	}
 	//PrintLog("check pre")
-	if h.ping("a", h.node.nodeFingerTable.predecessor.GetAddrWithPort()) == "" {
+	if _, s := h.ping("a", h.node.nodeFingerTable.predecessor.GetAddrWithPort()); s == "" {
 		h.node.SendMessageOut("Predecessor fail, set to null")
 		h.node.rpcModule.predecessorLocker.Lock()
 		h.node.nodeFingerTable.predecessor.Reset()
@@ -741,8 +738,8 @@ func (h *RpcServiceModule) Ping(p Greet, ret *Greet) (err error) {
 		err = errors.New("INVALID PING")
 		return
 	}
-	//PrintLog("New Ping Received")
-	ret.Name = "Hello" + p.Name
+	ret.From = h.node.Info
+	ret.Name = "Hello " + p.Name
 	return
 }
 
@@ -826,8 +823,7 @@ func (h *RpcServiceModule) Put(arg NodeData, s *Greet) (err error) {
 
 func (h *RpcServiceModule) Get(arg NodeData, ret *NodeData) (err error) {
 	if arg.From.IpAddress == "" || arg.From.Port == 0 {
-		err = errors.New("Who you are! Get fail")
-		return err
+		return errors.New("Who you are! Get fail")
 	} else {
 		//Not lock and have a try
 		ret.From = h.node.Info
@@ -835,7 +831,7 @@ func (h *RpcServiceModule) Get(arg NodeData, ret *NodeData) (err error) {
 		s, ok := h.node.data[arg.Key]
 		if !ok {
 			ret.Value = "Not Found"
-			return nil
+			return errors.New("Not Found")
 		} else {
 			ret.Value = s
 			return nil

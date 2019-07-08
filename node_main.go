@@ -142,7 +142,7 @@ func (n *RingNode) SendMessageIn(cmd string) {
 }
 
 func (n *RingNode) SendMessageOut(info string) {
-	//n.NodeMessageQueueOut <- *NewCtrlMsgFromString(info, 0)
+	// n.NodeMessageQueueOut <- *NewCtrlMsgFromString(info, 0)
 }
 
 func (n *RingNode) DumpData() {
@@ -173,10 +173,10 @@ func (n *RingNode) Put(k string, v string) bool {
 	return n.rpcModule.put(k, v)
 }
 
-func (n *RingNode) Get(k string) (string, bool) {
+func (n *RingNode) Get(k string) (bool, string) {
 	if !n.InRing || len(n.IfStop) > 0 {
 		fmt.Print("Get from node not in ring")
-		return "", false
+		return false, ""
 	}
 	return n.rpcModule.get(k)
 }
@@ -228,7 +228,7 @@ func (n *RingNode) handleMsg(msg *CtrlMessage) {
 		n.nodeFingerTable.DumpFingerTable()
 		break
 	case "ping":
-		ret := n.rpcModule.ping(",fuck", msg.name[1])
+		_, ret := n.rpcModule.ping(",fuck", msg.name[1])
 		if ret != "" {
 			n.SendMessageOut(ret)
 		}
@@ -243,7 +243,7 @@ func (n *RingNode) handleMsg(msg *CtrlMessage) {
 		n.Info.Print()
 		break
 	case "get":
-		res, ok := n.Get(msg.name[1])
+		ok, res := n.Get(msg.name[1])
 		if ok {
 			fmt.Println(res)
 		}
@@ -303,13 +303,14 @@ func (n *RingNode) Join(addrWithPort string) bool {
 	}
 }
 
-func (n *RingNode) Run(wg *sync.WaitGroup) {
+func (n *RingNode) Run() {
 	defer func() {
 		n.rpcModule.listener.Close()
 		close(n.NodeMessageQueueOut)
 		close(n.UserMessageQueueIn)
-		wg.Done()
+		// wg.Done() --> not cause the waste of resource
 	}()
+
 	var wgi sync.WaitGroup
 	n.rpcModule.startListen()
 	go n.rpcModule.accept()
@@ -322,4 +323,15 @@ func (n *RingNode) Run(wg *sync.WaitGroup) {
 	wgi.Add(1)
 	go n.rpcModule.checkPredecessor(&wgi)
 	wgi.Wait()
+}
+
+func (n *RingNode) Ping(addr string) bool {
+	b, s := n.rpcModule.ping("useless msg", addr)
+	println(s)
+	return b
+}
+
+func (n *RingNode) Dump() {
+	// fmt.Println(n.data)
+	// fmt.Println(n.nodeSuccessorList)
 }
